@@ -1,0 +1,7 @@
+fastapi
+transformers
+torch
+pydantic
+pydantic-settings
+numpy
+uvicorn
