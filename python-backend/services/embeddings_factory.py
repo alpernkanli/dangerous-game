@@ -1,6 +1,8 @@
 from functools import lru_cache
-from flan_t5_service import FLANT5EmbeddingsService
-from distilbart_service import DistilBARTEmbeddingsService
+
+from services.embeddings_service import EmbeddingsService
+from models.distilbart_embeddings_service import DistilBARTEmbeddingsService
+from models.flant5_embeddings_service import FLANT5EmbeddingsService
 
 embeddings_services = {
     "flan-t5": FLANT5EmbeddingsService,
@@ -15,12 +17,10 @@ def get_service(model_name: str) -> EmbeddingsService:
         print(f"Using cached service for model: {model_name}")
         return service_cache[model_name]
     
-    # Lazily instantiate and cache the service
     if model_name in embeddings_services:
         print(f"Instantiating service for model: {model_name}")
         service = embeddings_services[model_name]()
         service_cache[model_name] = service
         return service
     
-    # Raise an error for an unknown model
     raise ValueError(f"Unknown model: {model_name}")
