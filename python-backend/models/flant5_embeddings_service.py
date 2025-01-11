@@ -24,6 +24,18 @@ class FLANT5EmbeddingsService(EmbeddingsService):
         encoder_outputs = self.model.encoder(**inputs)
         embeddings = encoder_outputs.last_hidden_state
         return embeddings
+    
+    @torch.no_grad()
+    def encode_batch(self, texts: list[str]) -> torch.Tensor:
+        """
+        Encode a list of strings into a batched tensor.
+        texts: list[str]
+        returns: torch.Tensor shaped [batch_size, seq_len, hidden_size]
+        """
+        inputs = self.tokenizer(texts, return_tensors="pt", truncation=True, padding=True)
+        encoder_outputs = self.model.encoder(**inputs)
+        embeddings = encoder_outputs.last_hidden_state
+        return embeddings
 
 
     @torch.no_grad()

@@ -6,3 +6,4 @@ pydantic-settings
 numpy
 uvicorn
 sentencepiece
+qdrant-client

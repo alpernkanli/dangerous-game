@@ -3,41 +3,43 @@
 import React, { useState, useEffect } from 'react';
 import Game from '../components/Game';
 import Score from '../components/Score';
-import { getRandomWord } from './api/randomWord';
+import { getRandomWord, getRandomWords } from './api/randomWord';
 import { checkWord } from './api/checkWord';
 
-interface WordData {
-  word: string;
-  description: string;
-}
-
 const Home: React.FC = () => {
-  const [word, setWord] = useState<string>('');
-  const [description, setDescription] = useState<string>('');
-  const [score, setScore] = useState<number>(0);
-
+  const [words, setWords] = useState<string[]>([]);
+  const [n, setN] = useState<number>(3); // Default number of words
+  
   useEffect(() => {
-    fetchRandomWord();
-  }, []);
+    fetchRandomWords();
+  }, [n]);
 
-  const fetchRandomWord = async () => {
-    const data: WordData = await getRandomWord();
-    setWord(data.word);
-    setDescription(data.description);
+  const fetchRandomWords = async () => {
+    const data = await getRandomWords(n);
+    setWords(data);
   };
 
-  const handleCheckWord = async (tweakedDescription: string) => {
-    const isCorrect: boolean = await checkWord(tweakedDescription);
-    if (isCorrect) {
-      setScore(score + 1);
-      fetchRandomWord();
-    }
+  const handlePositionUpdate = (distances: number[]) => {
+    console.log('Distances to words:', distances);
   };
 
   return (
-    <div>
-      <Game word={word} description={description} onCheckWord={handleCheckWord} />
-      <Score score={score} />
+    <div className="container mx-auto p-4">
+      <div className="mb-4">
+        <label htmlFor="wordCount" className="mr-2">Number of words (2-8):</label>
+        <input
+          type="number"
+          id="wordCount"
+          min={2}
+          max={8}
+          value={n}
+          onChange={(e) => setN(Math.min(8, Math.max(2, parseInt(e.target.value) || 2)))}
+          className="border p-1"
+        />
+      </div>
+      
+      <Game words={words} onPositionUpdate={handlePositionUpdate} />
+      <Score score={5} />
     </div>
   );
 };
