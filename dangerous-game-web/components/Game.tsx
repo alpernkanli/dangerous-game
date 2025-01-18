@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { generateText, findClosestWord } from '../app/api/checkWord';
 
-interface GameProps {
-  words: string[];
-  onPositionUpdate: (distances: number[]) => void;
+interface Word {
+  word: string;
+  definition: string;
+  word_embedding: number[];
+  definition_embedding: number[];
 }
 
-const Game: React.FC<GameProps> = ({ words, onPositionUpdate }) => {
+
+interface GameProps {
+  words: Word[];
+  onPositionUpdate: (distances: number[]) => void;
+  onTextGenerated: (text: string) => void;
+  onClosestWordFound: (word: string, definition: string) => void;
+}
+
+const Game: React.FC<GameProps> = ({ words, onPositionUpdate, onTextGenerated, onClosestWordFound }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dragPoint, setDragPoint] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -20,6 +31,33 @@ const Game: React.FC<GameProps> = ({ words, onPositionUpdate }) => {
         y: center.y + radius * Math.sin(angle)
       };
     });
+  };
+
+  const calculateWeightedEmbedding = (distances: number[]) => {
+    console.log("Distances:", distances);
+    // Convert distances to weights (closer = higher weight)
+    const maxDistance = Math.max(...distances);
+    const weights = distances.map(d => 1 - (d / maxDistance));
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    
+    // Normalize weights
+    const normalizedWeights = weights.map(w => w / totalWeight);
+    
+    // Calculate weighted average of embeddings
+    const embeddingLength = words[0].word_embedding.length;
+    const weightedEmbedding = new Array(embeddingLength).fill(0);
+    
+    for (let i = 0; i < words.length; i++) {
+      const embedding = words[i].word_embedding;
+      const weight = normalizedWeights[i];
+      
+      for (let j = 0; j < embeddingLength; j++) {
+        weightedEmbedding[j] += embedding[j] * weight;
+      }
+    }
+    
+    console.log("Weighted embedding:", weightedEmbedding);
+    return weightedEmbedding;
   };
 
   useEffect(() => {
@@ -40,7 +78,7 @@ const Game: React.FC<GameProps> = ({ words, onPositionUpdate }) => {
     wordPositions.forEach((pos, index) => {
       ctx.font = '16px Arial';
       ctx.fillStyle = 'black';
-      ctx.fillText(words[index], pos.x - 30, pos.y);
+      ctx.fillText(words[index].word, pos.x - 30, pos.y);  // Access the word property
     });
 
     ctx.beginPath();
@@ -85,9 +123,35 @@ const Game: React.FC<GameProps> = ({ words, onPositionUpdate }) => {
     onPositionUpdate(distances);
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
+    if (isDragging) {
+        const wordPositions = calculateWordPositions();
+        const distances = wordPositions.map(pos => {
+            const dx = pos.x - dragPoint.x;
+            const dy = pos.y - dragPoint.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        });
+        
+        const weightedEmbedding = calculateWeightedEmbedding(distances);
+        
+        try {
+            const [textResponse, closestWordResponse] = await Promise.all([
+                generateText(weightedEmbedding),
+                findClosestWord(weightedEmbedding)
+            ]);
+            
+            if (onTextGenerated) {
+                onTextGenerated(textResponse.text);
+            }
+            if (onClosestWordFound) {
+                onClosestWordFound(closestWordResponse.word, closestWordResponse.definition);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
     setIsDragging(false);
-  };
+};
 
   return (
     <div>

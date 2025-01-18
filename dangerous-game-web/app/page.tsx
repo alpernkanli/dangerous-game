@@ -6,9 +6,18 @@ import Score from '../components/Score';
 import { getRandomWord, getRandomWords } from './api/randomWord';
 import { checkWord } from './api/checkWord';
 
+interface Word {
+  word: string;
+  definition: string;
+  word_embedding: number[];
+  definition_embedding: number[];
+}
+
 const Home: React.FC = () => {
-  const [words, setWords] = useState<string[]>([]);
+  const [words, setWords] = useState<Word[]>([]);
   const [n, setN] = useState<number>(3); // Default number of words
+  const [generatedText, setGeneratedText] = useState<string>("");
+  const [closestWord, setClosestWord] = useState<{ word: string; definition: string } | null>(null);
   
   useEffect(() => {
     fetchRandomWords();
@@ -38,8 +47,25 @@ const Home: React.FC = () => {
         />
       </div>
       
-      <Game words={words} onPositionUpdate={handlePositionUpdate} />
-      <Score score={5} />
+      <Game 
+        words={words} 
+        onPositionUpdate={handlePositionUpdate}
+        onTextGenerated={(text) => setGeneratedText(text)}
+        onClosestWordFound={(word, definition) => setClosestWord({ word, definition })}
+      />
+      {generatedText && (
+        <div>
+          <h3>Generated Text:</h3>
+          <p>{generatedText}</p>
+        </div>
+      )}
+      {closestWord && (
+        <div>
+          <h3>Closest Word:</h3>
+          <p>{closestWord.word}</p>
+          <p>{closestWord.definition}</p>
+        </div>
+      )}
     </div>
   );
 };

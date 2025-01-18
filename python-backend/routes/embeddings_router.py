@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from services.embeddings_factory import get_service
-from services.word_service import WordService
+from services.word_service import WordService  # Updated import
 
 embeddings_router = APIRouter()
 word_service = WordService()
@@ -46,3 +46,8 @@ async def get_random_words(n: int):
         }
         for word in words
     ]
+
+@embeddings_router.post("/find-closest-word")
+async def find_closest_word(request: DecodingRequest):
+    closest_word = word_service.find_closest_word(request.embedding)
+    return {"word": closest_word.word, "definition": closest_word.definition}

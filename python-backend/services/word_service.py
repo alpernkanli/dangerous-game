@@ -1,8 +1,8 @@
 from typing import List, Optional
 from pydantic import BaseModel
 import torch
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, SampleQuery, Sample
+import chromadb
+from chromadb.config import Settings
 import random
 
 from models.flant5_embeddings_service import FLANT5EmbeddingsService
@@ -10,144 +10,153 @@ from models.flant5_embeddings_service import FLANT5EmbeddingsService
 class Word(BaseModel):
     word: str
     definition: str
-    word_embedding: Optional[List[float]] = None
-    definiton_embedding: Optional[List[float]] = None
+    word_embedding: Optional[List[List[float]]] = None
+    definition_embedding: Optional[List[List[float]]] = None
     similarity_score: Optional[float] = None
 
 class WordService:
-    def __init__(self, collection_name: str = "theembeddings"):
-        self.qdrant = QdrantClient(path="./data/words_and_their_mappings")
-        self.collection_name = collection_name
-        
-        self.embedding_service = FLANT5EmbeddingsService()
-        #self._init_collection()
-
-    def _init_collection(self):
-        self.qdrant.recreate_collection(
-            collection_name=self.collection_name,
-            vectors_config=VectorParams(size=512, distance=Distance.COSINE)
+    def __init__(self, collection_name: str = "the-embeddings"):
+        self.client = chromadb.PersistentClient(path="./utils/data/words_and_their_mappings_chromadb")
+        self.collection = self.client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"}
         )
+        self.collection_name = collection_name
+        self.embedding_service = FLANT5EmbeddingsService()
 
     def add_word(self, word: str, definition: str):
         word_embedding = self.embedding_service.encode(word)
         definition_embedding = self.embedding_service.encode(definition)
-
+        
         pooled = definition_embedding.squeeze(0).mean(dim=0)
         
-        self.qdrant.upsert(
-            collection_name=self.collection_name,
-             points=[
-                PointStruct(
-                    id=hash(word),
-                    vector=pooled.tolist(),
-                    payload={
-                        "word": word,
-                        "definition": definition,
-                        "word_embedding": word_embedding.tolist(),
-                        "definition_embedding": definition_embedding.tolist()
-                    }
-                )
-            ]
+        self.collection.add(
+            ids=[str(hash(word))],
+            embeddings=[pooled.tolist()],
+            metadatas=[{
+                "word": word,
+                "definition": definition,
+                "word_embedding": word_embedding.tolist(),
+                "definition_embedding": definition_embedding.tolist()
+            }]
         )
 
     def batch_add_words(self, words: list[str], definitions: list[str]):
         definition_embeddings = self.embedding_service.encode_batch(definitions)
-        
         word_embeddings = self.embedding_service.encode_batch(words)
 
-        points = []
-        for i, (w, d) in enumerate(zip(words, definitions)):
-            pooled = definition_embeddings[i].mean(dim=0)  # or however you pool
-            points.append(
-                PointStruct(
-                    id=hash(w),
-                    vector=pooled.tolist(),
-                    payload={
-                        "word": w,
-                        "definition": d,
-                        "word_embedding": word_embeddings[i].tolist(),
-                        "definition_embedding": definition_embeddings[i].tolist()
-                    }
-                )
-            )
+        ids = [str(hash(w)) for w in words]
+        embeddings = [emb.mean(dim=0).tolist() for emb in definition_embeddings]
+        metadatas = [
+            {
+                "word": w,
+                "definition": d,
+                "word_embedding": str(we.tolist()),
+                "definition_embedding": str(de.tolist())
+            }
+            for w, d, we, de in zip(words, definitions, word_embeddings, definition_embeddings)
+        ]
 
-        self.qdrant.upsert(collection_name=self.collection_name, points=points)
+        self.collection.add(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas
+        )
 
     def get_word(self, word: str) -> Optional[Word]:
-        results = self.qdrant.scroll(
-            collection_name=self.collection_name,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="word", match=MatchValue(value=word))]
-            ),
+        results = self.collection.get(
+            where={"word": word},
             limit=1
-        )[0]
+        )
         
-        if not results:
+        if not results['metadatas']:
             return None
             
-        point = results[0]
+        metadata = results['metadatas'][0]
         return Word(
-            word=point.payload["word"],
-            definition=point.payload["definition"],
-            word_embedding=point.payload["word_embedding"],
-            definition_embedding=point.payload["definition_embedding"]
+            word=metadata["word"],
+            definition=metadata["definition"],
+            word_embedding=metadata["word_embedding"],
+            definition_embedding=metadata["definition_embedding"]
         )
 
     def get_random_word(self) -> Optional[Word]:
-        sampled = self.qdrant.query_points(
-            collection_name=self.collection_name,
-            query=SampleQuery(sample=Sample.RANDOM)
-        )
-        
-        if not sampled:
+        total_count = self.collection.count()
+        if total_count == 0:
             return None
-        print(sampled)
-        random_point = sampled
+            
+        random_index = random.randint(0, total_count - 1)
+        result = self.collection.get(limit=1, offset=random_index)
+        
+        if not result['metadatas']:
+            return None
+            
+        metadata = result['metadatas'][0]
         return Word(
-            word=random_point.payload["word"],
-            definition=random_point.payload["definition"],
-            word_embedding=random_point.payload["word_embedding"],
-            definition_embedding=random_point.payload["definition_embedding"]
+            word=metadata["word"],
+            definition=metadata["definition"],
+            word_embedding=eval(metadata["word_embedding"]),
+            definition_embedding=eval(metadata["definition_embedding"])
         )
     
     def get_random_words(self, n: int) -> List[Word]:
-        # Query n random points directly
-        sampled = self.qdrant.scroll(
-            collection_name=self.collection_name,
-            limit=n,
-            with_payload=True,
-            offset=random.randint(0, self.qdrant.get_collection(self.collection_name).points_count - n)
-        )[0]
-        
-        if not sampled:
+        total_count = self.collection.count()
+        if total_count == 0:
             return []
+            
+        # Generate n random unique indices
+        indices = random.sample(range(total_count), min(n, total_count))
         
-        return [
-            Word(
-                word=point.payload["word"],
-                definition=point.payload["definition"],
-                word_embedding=point.payload["word_embedding"],
-                definition_embedding=point.payload["definition_embedding"]
-            )
-            for point in sampled
-        ]
+        # Get words one by one using their indices
+        words = []
+        for idx in indices:
+            result = self.collection.get(limit=1, offset=idx)
+            if result['metadatas']:
+                metadata = result['metadatas'][0]
+                words.append(Word(
+                    word=metadata["word"],
+                    definition=metadata["definition"],
+                    word_embedding=eval(metadata["word_embedding"]),
+                    definition_embedding=eval(metadata["definition_embedding"])
+                ))
+        
+        return words
 
     def search_similar_definitions(self, query: str, limit: int = 5) -> List[Word]:
         query_embedding = self.embedding_service.encode(query)
-
-        search_results = self.qdrant.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding.flatten().tolist(),
-            limit=limit
+        
+        results = self.collection.query(
+            query_embeddings=[query_embedding.flatten().tolist()],
+            n_results=limit
         )
+        
+        if not results['metadatas']:
+            return []
 
         return [
             Word(
-                word=result.payload["word"],
-                definition=result.payload["definition"],
-                word_embedding=result.payload["word_embedding"],
-                definition_embedding=result.payload["definition_embedding"],
-                similarity_score=result.score
+                word=metadata["word"],
+                definition=metadata["definition"],
+                word_embedding=metadata["word_embedding"],
+                definition_embedding=metadata["definition_embedding"],
+                similarity_score=distance
             )
-            for result in search_results
+            for metadata, distance in zip(results['metadatas'][0], results['distances'][0])
         ]
+    
+    def find_closest_word(self, embedding: List[float]) -> Optional[Word]:
+        result = self.collection.query(
+            query_embeddings=[embedding],
+            n_results=1
+        )
+    
+        if not result['metadatas'] or not result['metadatas'][0]:
+            return None
+        
+        metadata = result['metadatas'][0][0]  # Get first result's metadata
+        return Word(
+            word=metadata["word"],
+            definition=metadata["definition"],
+            word_embedding=eval(metadata["word_embedding"]),
+            definition_embedding=eval(metadata["definition_embedding"])
+        )
